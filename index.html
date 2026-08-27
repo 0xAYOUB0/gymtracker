@@ -2,16 +2,753 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#121417" />
     <title>Gym Tracker</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #121417; }
+        body { background: #121417; font-family: 'Inter', -apple-system, sans-serif; }
         #root { min-height: 100vh; }
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+        input::placeholder { color: #5A5F68; }
+        button { font-family: inherit; cursor: pointer; }
+        input:focus, button:focus { outline: 2px solid #C8FF4D; outline-offset: 1px; }
     </style>
-  <script type="module" crossorigin src="/assets/index-CV7wLxJ-.js"></script>
 </head>
 <body>
     <div id="root"></div>
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18",
+            "react-dom": "https://esm.sh/react-dom@18",
+            "lucide-react": "https://esm.sh/lucide-react@0.263"
+        }
+    }
+    </script>
+    <script type="module">
+        import React from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { useState, useEffect, useRef } from 'react';
+        import { Plus, Trash2, ChevronUp, ChevronRight, X, Check, TrendingUp, TrendingDown, Minus, Dumbbell, Scale } from 'lucide-react';
+
+        const STORAGE_KEY = "gym-tracker-data-v2";
+
+        const biceps = [
+          { id: "bi1", name: "hammer curls", targetSets: 2 },
+          { id: "bi2", name: "straight bar curls", targetSets: 2 },
+          { id: "bi3", name: "Preacher Curl with the bar", targetSets: 2 },
+        ];
+
+        const pull = [
+          { id: "pu1", name: "rowing", targetSets: 2 },
+          { id: "pu2", name: "lat pull down (shoulder width)", targetSets: 2 },
+          { id: "pu3", name: "cable rowing (wide)", targetSets: 2 },
+          { id: "pu4", name: "lat pull down ( wide )", targetSets: 2 },
+          { id: "pu5", name: "trapiz (dumbells and lean lil forward)", targetSets: 2 },
+          { id: "pu6", name: "rare delts (incline bench with dumbells)", targetSets: 2 },
+          { id: "pu7", name: "rare delts (cable at head lvl and go down)", targetSets: 2 },
+          { id: "pu8", name: "cable triceps extension (push)", targetSets: 2 },
+          { id: "pu9", name: "back triceps cable extension (pull)", targetSets: 3 },
+        ];
+
+        const DEFAULT_DATA = {
+          days: [
+            {
+              id: "d1",
+              name: "Push 1 + Biceps",
+              exercises: [
+                { id: "p1a", name: "flat dumbell press ( arch back_ slightly twist the arm inside)", targetSets: 3 },
+                { id: "p1b", name: "bar inclinT press", targetSets: 2 },
+                { id: "p1c", name: "dumbell incline press", targetSets: 2 },
+                { id: "p1d", name: "incline dumble chest fly", targetSets: 2 },
+                { id: "p1e", name: "shoulders dumbell flys (push )", targetSets: 2 },
+                { id: "p1f", name: "cable shoulders fly (pull)", targetSets: 2 },
+                { id: "p1g", name: "cable front delts pulls ( lil under trma )", targetSets: 2 },
+                ...biceps.map((e) => ({ ...e, id: e.id + "_d1" })),
+              ],
+            },
+            {
+              id: "d2",
+              name: "Pull + Triceps",
+              exercises: pull.map((e) => ({ ...e, id: e.id + "_d2" })),
+            },
+            {
+              id: "d3",
+              name: "Push 2 + Biceps",
+              exercises: [
+                { id: "p2a", name: "flat dumbell press ( same as 1 )", targetSets: 3 },
+                { id: "p2b", name: "flat dumbell chest fly (always arch)", targetSets: 2 },
+                { id: "p2c", name: "decline chest machine press (lean back and arch)", targetSets: 2 },
+                { id: "p2d", name: "decline cable push ( 1 slot above head lvl_ control the way back up)", targetSets: 2 },
+                { id: "p2e", name: "shoulders dumbell flys (push )", targetSets: 2 },
+                { id: "p2f", name: "cable shoulders fly (pull)", targetSets: 2 },
+                { id: "p2g", name: "cable front delts pulls ( lil under trma )", targetSets: 2 },
+                ...biceps.map((e) => ({ ...e, id: e.id + "_d3" })),
+              ],
+            },
+            {
+              id: "d4",
+              name: "Pull + Triceps",
+              exercises: pull.map((e) => ({ ...e, id: e.id + "_d4" })),
+            },
+          ],
+          logs: {},
+          bodyWeight: [],
+        };
+
+        function uid() {
+          return Math.random().toString(36).slice(2, 9);
+        }
+
+        function todayISO() {
+          const d = new Date();
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
+        function fmtDate(iso) {
+          const [y, m, d] = iso.split("-").map(Number);
+          const date = new Date(y, m - 1, d);
+          return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        }
+
+        function nowTime() {
+          return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        }
+
+        function topSet(sets) {
+          if (!sets || sets.length === 0) return null;
+          return sets.reduce((best, s) => (s.weight > best.weight ? s : best.weight === s.weight && s.reps > best.reps ? s : best), sets[0]);
+        }
+
+        window.storage = {
+          get: (key) => {
+            try {
+              const value = localStorage.getItem(key);
+              return Promise.resolve({ value });
+            } catch { 
+              return Promise.resolve(null);
+            }
+          },
+          set: (key, value) => {
+            try {
+              localStorage.setItem(key, value);
+              return Promise.resolve();
+            } catch { 
+              return Promise.resolve();
+            }
+          }
+        };
+
+        function GymTracker() {
+          const [data, setData] = useState(null);
+          const [loaded, setLoaded] = useState(false);
+          const [view, setView] = useState("workout");
+          const [weightDraft, setWeightDraft] = useState("");
+          const [activeDay, setActiveDay] = useState(0);
+          const [editingDays, setEditingDays] = useState(false);
+          const [newExerciseName, setNewExerciseName] = useState("");
+          const [newExerciseSets, setNewExerciseSets] = useState("3");
+          const [addingExercise, setAddingExercise] = useState(false);
+          const [showDayLog, setShowDayLog] = useState(false);
+          const [draftSets, setDraftSets] = useState({});
+          const [saveTick, setSaveTick] = useState(0);
+          const saveTimer = useRef(null);
+
+          useEffect(() => {
+            (async () => {
+              try {
+                const res = await window.storage.get(STORAGE_KEY, false);
+                if (res && res.value) {
+                  const parsed = JSON.parse(res.value);
+                  if (!parsed.bodyWeight) parsed.bodyWeight = [];
+                  setData(parsed);
+                } else {
+                  setData(DEFAULT_DATA);
+                }
+              } catch (e) {
+                setData(DEFAULT_DATA);
+              }
+              setLoaded(true);
+            })();
+          }, []);
+
+          useEffect(() => {
+            if (!loaded || !data) return;
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+            saveTimer.current = setTimeout(async () => {
+              try {
+                await window.storage.set(STORAGE_KEY, JSON.stringify(data), false);
+              } catch (e) {}
+            }, 300);
+            return () => clearTimeout(saveTimer.current);
+          }, [data, loaded, saveTick]);
+
+          if (!loaded || !data) {
+            return (
+              <div style={{ minHeight: 480, background: "#121417", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, sans-serif", color: "#8A8F98" }}>
+                Loading...
+              </div>
+            );
+          }
+
+          const day = data.days[activeDay];
+
+          function updateData(fn) {
+            setData((prev) => {
+              const next = structuredClone(prev);
+              fn(next);
+              return next;
+            });
+          }
+
+          function logWeight(value) {
+            const w = parseFloat(value);
+            if (isNaN(w) || w <= 0) return;
+            updateData((d) => {
+              if (!d.bodyWeight) d.bodyWeight = [];
+              const existing = d.bodyWeight.find((e) => e.date === todayISO());
+              if (existing) {
+                existing.weight = w;
+                existing.time = nowTime();
+              } else {
+                d.bodyWeight.push({ date: todayISO(), time: nowTime(), weight: w });
+              }
+            });
+            setWeightDraft("");
+          }
+
+          function deleteWeightEntry(date) {
+            updateData((d) => {
+              d.bodyWeight = d.bodyWeight.filter((e) => e.date !== date);
+            });
+          }
+
+          function getSortedWeights() {
+            return [...(data.bodyWeight || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+          }
+
+          function renameDay(id, name) {
+            updateData((d) => {
+              const dd = d.days.find((x) => x.id === id);
+              if (dd) dd.name = name;
+            });
+          }
+
+          function addDay() {
+            if (data.days.length >= 7) return;
+            updateData((d) => {
+              d.days.push({ id: uid(), name: `Day ${d.days.length + 1}`, exercises: [] });
+            });
+          }
+
+          function removeDay(id) {
+            updateData((d) => {
+              d.days = d.days.filter((x) => x.id !== id);
+            });
+            setActiveDay(0);
+          }
+
+          function addExercise(name, targetSets) {
+            if (!name.trim()) return;
+            const t = parseInt(targetSets, 10);
+            updateData((d) => {
+              d.days[activeDay].exercises.push({ id: uid(), name: name.trim(), targetSets: isNaN(t) || t <= 0 ? 3 : t });
+            });
+            setNewExerciseName("");
+            setNewExerciseSets("3");
+            setAddingExercise(false);
+          }
+
+          function removeExercise(exId) {
+            updateData((d) => {
+              d.days[activeDay].exercises = d.days[activeDay].exercises.filter((e) => e.id !== exId);
+            });
+          }
+
+          function getDayLog() {
+            const dateMap = {};
+            day.exercises.forEach((ex) => {
+              const hist = getHistory(ex.id);
+              hist.forEach((session) => {
+                if (!session.sets || session.sets.length === 0) return;
+                if (!dateMap[session.date]) dateMap[session.date] = { time: session.time, rows: [] };
+                if (session.time) dateMap[session.date].time = session.time;
+                dateMap[session.date].rows.push({
+                  name: ex.name,
+                  setsStr: session.sets.map((s) => `${s.weight}×${s.reps}`).join(" / "),
+                });
+              });
+            });
+            return Object.entries(dateMap)
+              .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+              .map(([date, v]) => ({ date, ...v }));
+          }
+
+          function getHistory(exId) {
+            return data.logs[exId] || [];
+          }
+
+          function getTodaySession(exId) {
+            const hist = getHistory(exId);
+            return hist.find((s) => s.date === todayISO());
+          }
+
+          function getLastSession(exId) {
+            const hist = getHistory(exId).filter((s) => s.date !== todayISO());
+            if (hist.length === 0) return null;
+            return hist[hist.length - 1];
+          }
+
+          function addSet(exId, weight, reps) {
+            if (weight === "" || reps === "") return;
+            const w = parseFloat(weight);
+            const r = parseInt(reps, 10);
+            if (isNaN(w) || isNaN(r) || w < 0 || r <= 0) return;
+            updateData((d) => {
+              if (!d.logs[exId]) d.logs[exId] = [];
+              let session = d.logs[exId].find((s) => s.date === todayISO());
+              if (!session) {
+                session = { date: todayISO(), time: nowTime(), sets: [] };
+                d.logs[exId].push(session);
+              }
+              session.time = nowTime();
+              session.sets.push({ weight: w, reps: r });
+            });
+            setDraftSets((prev) => ({ ...prev, [exId]: { weight: "", reps: "" } }));
+          }
+
+          function removeSet(exId, setIdx) {
+            updateData((d) => {
+              const session = d.logs[exId]?.find((s) => s.date === todayISO());
+              if (session) session.sets.splice(setIdx, 1);
+            });
+          }
+
+          const font = { body: "'Inter', -apple-system, sans-serif", mono: "'JetBrains Mono', 'Courier New', monospace", display: "'Oswald', 'Inter', sans-serif" };
+          const colors = {
+            bg: "#121417",
+            surface: "#1B1E23",
+            surface2: "#22262C",
+            border: "#2C3038",
+            text: "#EDEEF0",
+            textDim: "#8A8F98",
+            accent: "#C8FF4D",
+            accentDim: "#8FB83A",
+            danger: "#FF5B4D",
+          };
+
+          return (
+            <div style={{ background: colors.bg, minHeight: 600, fontFamily: font.body, color: colors.text, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto", borderRadius: 12, overflow: "hidden" }}>
+              <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+                * { box-sizing: border-box; }
+                input::placeholder { color: #5A5F68; }
+                button { font-family: inherit; cursor: pointer; }
+                input:focus, button:focus { outline: 2px solid ${colors.accent}; outline-offset: 1px; }
+              `}</style>
+
+              <div style={{ padding: "20px 18px 14px", borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Dumbbell size={20} color={colors.accent} strokeWidth={2.5} />
+                  <span style={{ fontFamily: font.display, fontSize: 13, letterSpacing: "0.12em", color: colors.textDim, textTransform: "uppercase" }}>Progressive Overload Log</span>
+                </div>
+                <div style={{ fontFamily: font.mono, fontSize: 12, color: colors.textDim, marginTop: 6 }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, padding: "12px 14px 0" }}>
+                <button
+                  onClick={() => setView("workout")}
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "9px 0",
+                    borderRadius: 10,
+                    border: `1px solid ${view === "workout" ? colors.accent : colors.border}`,
+                    background: view === "workout" ? "rgba(200,255,77,0.10)" : "transparent",
+                    color: view === "workout" ? colors.accent : colors.textDim,
+                    fontFamily: font.display,
+                    fontWeight: 600,
+                    fontSize: 13,
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  <Dumbbell size={14} /> Workouts
+                </button>
+                <button
+                  onClick={() => setView("weight")}
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "9px 0",
+                    borderRadius: 10,
+                    border: `1px solid ${view === "weight" ? colors.accent : colors.border}`,
+                    background: view === "weight" ? "rgba(200,255,77,0.10)" : "transparent",
+                    color: view === "weight" ? colors.accent : colors.textDim,
+                    fontFamily: font.display,
+                    fontWeight: 600,
+                    fontSize: 13,
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  <Scale size={14} /> Weight
+                </button>
+              </div>
+
+              {view === "workout" ? (
+                <>
+              <div style={{ display: "flex", overflowX: "auto", gap: 6, padding: "12px 14px", borderBottom: `1px solid ${colors.border}` }}>
+                {data.days.map((d, i) => (
+                  <button
+                    key={d.id}
+                    onClick={() => { setActiveDay(i); setShowDayLog(false); }}
+                    style={{
+                      flexShrink: 0,
+                      padding: "8px 16px",
+                      borderRadius: 999,
+                      border: `1px solid ${i === activeDay ? colors.accent : colors.border}`,
+                      background: i === activeDay ? colors.accent : "transparent",
+                      color: i === activeDay ? "#121417" : colors.textDim,
+                      fontFamily: font.display,
+                      fontWeight: 600,
+                      fontSize: 13,
+                      letterSpacing: "0.03em",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {d.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setEditingDays((v) => !v)}
+                  style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 999, border: `1px solid ${colors.border}`, background: editingDays ? colors.surface2 : "transparent", color: colors.textDim, display: "flex", alignItems: "center", justifyContent: "center" }}
+                  aria-label="Edit days"
+                >
+                  {editingDays ? <X size={15} /> : <Plus size={15} />}
+                </button>
+              </div>
+
+              {editingDays && (
+                <div style={{ padding: "12px 14px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {data.days.map((d) => (
+                    <div key={d.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        value={d.name}
+                        onChange={(e) => renameDay(d.id, e.target.value)}
+                        style={{ flex: 1, background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "8px 10px", color: colors.text, fontSize: 14 }}
+                      />
+                      {data.days.length > 1 && (
+                        <button onClick={() => removeDay(d.id)} style={{ background: "none", border: "none", color: colors.danger, padding: 6 }} aria-label="Delete day">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {data.days.length < 7 && (
+                    <button onClick={addDay} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px 10px", color: colors.textDim, fontSize: 13, justifyContent: "center" }}>
+                      <Plus size={14} /> Add day
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div style={{ padding: "10px 14px 0" }}>
+                <button
+                  onClick={() => setShowDayLog((v) => !v)}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    background: colors.surface,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 10,
+                    padding: "10px 12px",
+                    color: colors.text,
+                  }}
+                >
+                  <span style={{ fontFamily: font.display, fontSize: 13, letterSpacing: "0.03em", color: colors.textDim }}>
+                    {day.name} · Day log
+                  </span>
+                  <ChevronRight size={15} color={colors.textDim} style={{ transform: showDayLog ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+                </button>
+
+                {showDayLog && (
+                  <div style={{ marginTop: 8, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "10px 12px", maxHeight: 260, overflowY: "auto" }}>
+                    {getDayLog().length === 0 ? (
+                      <div style={{ color: colors.textDim, fontSize: 13, textAlign: "center", padding: "10px 0" }}>No sessions logged for this day yet.</div>
+                    ) : (
+                      getDayLog().map((entry, i) => (
+                        <div key={entry.date} style={{ marginBottom: i === getDayLog().length - 1 ? 0 : 14 }}>
+                          <div style={{ fontFamily: font.mono, fontSize: 12, color: colors.accent, marginBottom: 5 }}>
+                            {fmtDate(entry.date)}{entry.time ? ` · ${entry.time}` : ""}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            {entry.rows.map((r, ri) => (
+                              <div key={ri} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
+                                <span style={{ color: colors.textDim, flex: "0 0 46%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                                <span style={{ fontFamily: font.mono, color: colors.text, textAlign: "right" }}>{r.setsStr}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {i !== getDayLog().length - 1 && <div style={{ borderBottom: `1px solid ${colors.border}`, marginTop: 12 }} />}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ flex: 1, padding: "14px 14px 90px", display: "flex", flexDirection: "column", gap: 12 }}>
+                {day.exercises.length === 0 && !addingExercise && (
+                  <div style={{ textAlign: "center", padding: "40px 20px", color: colors.textDim }}>
+                    <div style={{ fontFamily: font.display, fontSize: 15, marginBottom: 6 }}>No exercises yet</div>
+                    <div style={{ fontSize: 13, lineHeight: 1.5 }}>Add the lifts you do on {day.name} to start logging sets.</div>
+                  </div>
+                )}
+
+                {day.exercises.map((ex) => {
+                  const last = getLastSession(ex.id);
+                  const todaySession = getTodaySession(ex.id);
+                  const lastTop = last ? topSet(last.sets) : null;
+                  const todayTop = todaySession ? topSet(todaySession.sets) : null;
+                  const draft = draftSets[ex.id] || { weight: "", reps: "" };
+
+                  let trend = null;
+                  if (lastTop && todayTop) {
+                    if (todayTop.weight > lastTop.weight || (todayTop.weight === lastTop.weight && todayTop.reps > lastTop.reps)) trend = "up";
+                    else if (todayTop.weight < lastTop.weight) trend = "down";
+                    else trend = "flat";
+                  }
+
+                  return (
+                    <div key={ex.id} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 14, padding: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: font.display, fontSize: 16, fontWeight: 600 }}>{ex.name}</div>
+                          {last ? (
+                            <div style={{ marginTop: 4 }}>
+                              <div style={{ fontSize: 11, color: colors.textDim, fontFamily: font.mono }}>
+                                Last · {fmtDate(last.date)}{last.time ? ` ${last.time}` : ""}
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+                                {last.sets.map((s, i) => (
+                                  <span key={i} style={{ fontFamily: font.mono, fontSize: 12, color: colors.textDim, background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "2px 6px" }}>
+                                    {s.weight}×{s.reps}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12, color: colors.textDim, marginTop: 2, fontFamily: font.mono }}>No history yet</div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          <span
+                            style={{
+                              fontFamily: font.mono,
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 999,
+                              border: `1px solid ${todaySession && todaySession.sets.length >= ex.targetSets ? colors.accent : colors.border}`,
+                              color: todaySession && todaySession.sets.length >= ex.targetSets ? colors.accent : colors.textDim,
+                            }}
+                          >
+                            {(todaySession ? todaySession.sets.length : 0)}/{ex.targetSets || 3} sets
+                          </span>
+                          {trend === "up" && <TrendingUp size={16} color={colors.accent} />}
+                          {trend === "down" && <TrendingDown size={16} color={colors.danger} />}
+                          {trend === "flat" && <Minus size={16} color={colors.textDim} />}
+                          <button onClick={() => removeExercise(ex.id)} style={{ background: "none", border: "none", color: colors.textDim, padding: 4 }} aria-label="Remove exercise">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {todaySession && todaySession.sets.length > 0 && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 11, color: colors.accent, fontFamily: font.mono, marginBottom: 4 }}>
+                            Today · {todaySession.time}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {todaySession.sets.map((s, idx) => {
+                              const isPR = lastTop && (s.weight > lastTop.weight || (s.weight === lastTop.weight && s.reps > lastTop.reps));
+                              return (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    background: isPR ? "rgba(200,255,77,0.12)" : colors.surface2,
+                                    border: `1px solid ${isPR ? colors.accent : colors.border}`,
+                                    borderRadius: 8,
+                                    padding: "5px 9px",
+                                    fontFamily: font.mono,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  <span>{s.weight}×{s.reps}</span>
+                                  {isPR && <ChevronUp size={12} color={colors.accent} />}
+                                  <button onClick={() => removeSet(ex.id, idx)} style={{ background: "none", border: "none", color: colors.textDim, padding: 0, display: "flex" }} aria-label="Remove set">
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder={lastTop ? String(lastTop.weight) : "kg"}
+                          value={draft.weight}
+                          onChange={(e) => setDraftSets((p) => ({ ...p, [ex.id]: { ...draft, weight: e.target.value } }))}
+                          style={{ width: 70, background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "8px 10px", color: colors.text, fontFamily: font.mono, fontSize: 14 }}
+                        />
+                        <span style={{ alignSelf: "center", color: colors.textDim }}>×</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          placeholder={lastTop ? String(lastTop.reps) : "reps"}
+                          value={draft.reps}
+                          onChange={(e) => setDraftSets((p) => ({ ...p, [ex.id]: { ...draft, reps: e.target.value } }))}
+                          style={{ width: 70, background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "8px 10px", color: colors.text, fontFamily: font.mono, fontSize: 14 }}
+                        />
+                        <button
+                          onClick={() => addSet(ex.id, draft.weight, draft.reps)}
+                          style={{ flex: 1, background: colors.accent, border: "none", borderRadius: 8, color: "#121417", fontFamily: font.display, fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+                        >
+                          <Plus size={14} /> Set
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {addingExercise ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      autoFocus
+                      value={newExerciseName}
+                      onChange={(e) => setNewExerciseName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addExercise(newExerciseName, newExerciseSets)}
+                      placeholder="Exercise name"
+                      style={{ flex: 1, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "10px 12px", color: colors.text, fontSize: 14 }}
+                    />
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={newExerciseSets}
+                      onChange={(e) => setNewExerciseSets(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addExercise(newExerciseName, newExerciseSets)}
+                      placeholder="sets"
+                      title="Target sets"
+                      style={{ width: 56, background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "10px 6px", color: colors.text, fontSize: 14, fontFamily: font.mono, textAlign: "center" }}
+                    />
+                    <button onClick={() => addExercise(newExerciseName, newExerciseSets)} style={{ background: colors.accent, border: "none", borderRadius: 10, padding: "0 14px", color: "#121417", display: "flex", alignItems: "center" }}>
+                      <Check size={16} />
+                    </button>
+                    <button onClick={() => { setAddingExercise(false); setNewExerciseName(""); setNewExerciseSets("3"); }} style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "0 14px", color: colors.textDim, display: "flex", alignItems: "center" }}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingExercise(true)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "none", border: `1px dashed ${colors.border}`, borderRadius: 12, padding: "12px", color: colors.textDim, fontFamily: font.display, fontSize: 13, letterSpacing: "0.03em" }}
+                  >
+                    <Plus size={15} /> Add exercise to {day.name}
+                  </button>
+                )}
+              </div>
+                </>
+              ) : (
+                <div style={{ flex: 1, padding: "16px 14px 40px", display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 14, padding: 16 }}>
+                    <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Log today's weight</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={weightDraft}
+                        onChange={(e) => setWeightDraft(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && logWeight(weightDraft)}
+                        placeholder={getSortedWeights()[0] ? String(getSortedWeights()[0].weight) : "e.g. 78.5"}
+                        style={{ flex: 1, background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 10, padding: "10px 12px", color: colors.text, fontFamily: font.mono, fontSize: 15 }}
+                      />
+                      <button
+                        onClick={() => logWeight(weightDraft)}
+                        style={{ background: colors.accent, border: "none", borderRadius: 10, padding: "0 18px", color: "#121417", fontFamily: font.display, fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}
+                      >
+                        <Plus size={14} /> Log
+                      </button>
+                    </div>
+                    {getSortedWeights().some((e) => e.date === todayISO()) && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: colors.accent, fontFamily: font.mono }}>Logged for today · updates if you log again.</div>
+                    )}
+                  </div>
+
+                  <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 14, padding: 16 }}>
+                    <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 600, marginBottom: 10 }}>History</div>
+                    {getSortedWeights().length === 0 ? (
+                      <div style={{ color: colors.textDim, fontSize: 13, textAlign: "center", padding: "20px 0" }}>No weigh-ins yet. Log your first one above.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {getSortedWeights().map((entry, i, arr) => {
+                          const prev = arr[i + 1];
+                          let trend = null;
+                          if (prev) {
+                            if (entry.weight > prev.weight) trend = "up";
+                            else if (entry.weight < prev.weight) trend = "down";
+                            else trend = "flat";
+                          }
+                          return (
+                            <div
+                              key={entry.date}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                padding: "9px 2px",
+                                borderBottom: i !== arr.length - 1 ? `1px solid ${colors.border}` : "none",
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontSize: 13, fontFamily: font.mono, color: colors.text }}>{fmtDate(entry.date)}{entry.time ? ` · ${entry.time}` : ""}</div>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                {trend === "up" && <TrendingUp size={14} color={colors.danger} />}
+                                {trend === "down" && <TrendingDown size={14} color={colors.accent} />}
+                                {trend === "flat" && <Minus size={14} color={colors.textDim} />}
+                                <span style={{ fontFamily: font.mono, fontSize: 15, fontWeight: 600, color: colors.text, minWidth: 54, textAlign: "right" }}>{entry.weight}</span>
+                                <button onClick={() => deleteWeightEntry(entry.date)} style={{ background: "none", border: "none", color: colors.textDim, padding: 2, display: "flex" }} aria-label="Delete entry">
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(GymTracker));
+    </script>
 </body>
 </html>
